@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables (보안상 절대 올리지 마세요)
+.env
+
+# Local data (개인 메일 확인 기록)
+data/*
+!data/.gitkeep
+
+# OS generated files
+.DS_Store
+Thumbs.db
