@@ -1,6 +1,5 @@
 import poplib
 import requests
-import json
 import time
 import os
 import urllib3
@@ -21,6 +20,7 @@ EMAIL_PW = os.getenv('EMAIL_PW')
 MM_URL = 'https://chat.a2m.co.kr'
 MMAUTHTOKEN = os.getenv('MMAUTHTOKEN')
 MY_CHANNEL_ID = os.getenv('MY_CHANNEL_ID')
+LAST_IDX_FILE = DATA_DIR / "last_idx.txt"
 
 # 상태 체크용 변수
 last_report_date = ""
@@ -53,9 +53,17 @@ def send_mm(message):
         }
     }
     try:
-        requests.post(f"{MM_URL}/api/v4/posts", headers=headers, json=payload, verify=False, timeout=10)
+        response = requests.post(f"{MM_URL}/api/v4/posts", headers=headers, json=payload, verify=False, timeout=10)
+        response.raise_for_status()
     except Exception as e:
         print(f"MM 전송 에러: {e}")
+
+def read_last_idx(default_idx):
+    try:
+        return int(LAST_IDX_FILE.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError):
+        LAST_IDX_FILE.write_text(str(default_idx), encoding="utf-8")
+        return default_idx
 
 def check_and_notify():
     global last_report_date
@@ -79,14 +87,12 @@ def check_and_notify():
         server.pass_(EMAIL_PW)
         
         msg_count = len(server.list()[1])
-        DATA_DIR.mkdir(exist_ok=True)
-        last_idx_file = DATA_DIR / "last_idx.txt"
-        
-        if not os.path.exists(last_idx_file):
-            with open(last_idx_file, "w") as f: f.write(str(msg_count))
-            return
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        last_idx = read_last_idx(msg_count)
 
-        with open(last_idx_file, "r") as f: last_idx = int(f.read().strip())
+        if msg_count < last_idx:
+            LAST_IDX_FILE.write_text(str(msg_count), encoding="utf-8")
+            return
 
         # 3. 새 메일 확인 및 알림 전송
         if msg_count > last_idx:
@@ -109,12 +115,16 @@ def check_and_notify():
                 )
                 send_mm(msg)
             
-            with open(last_idx_file, "w") as f: f.write(str(msg_count))
+            LAST_IDX_FILE.write_text(str(msg_count), encoding="utf-8")
 
     except Exception as e:
         print(f"에러 발생: {e}")
     finally:
-        if server: server.quit()
+        if server:
+            try:
+                server.quit()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     while True:
