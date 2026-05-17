@@ -94,6 +94,7 @@ def send_mm(message):
         logging.exception("Mattermost 알림 전송 실패: %s", e)
 
 def read_last_idx(default_idx):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:
         return int(LAST_IDX_FILE.read_text(encoding="utf-8").strip())
     except (FileNotFoundError, ValueError):
@@ -109,20 +110,47 @@ def parse_args():
     )
     return parser.parse_args()
 
+def get_pop3_server():
+    server = None
+    try:
+        logging.info("POP3 SSL 접속 시도: %s:995", POP3_SERVER)
+        server = poplib.POP3_SSL(POP3_SERVER, 995, timeout=10)
+    except Exception as ssl_error:
+        logging.warning("POP3 SSL 접속 실패, 일반 POP3로 재시도합니다: %s", ssl_error)
+        server = poplib.POP3(POP3_SERVER, 110, timeout=10)
+    return server
+
+def login_pop3(server):
+    try:
+        server.user(EMAIL_USER)
+        server.pass_(EMAIL_PW)
+        logging.info("메일 서버 로그인 성공: %s", EMAIL_USER)
+    except poplib.error_proto as e:
+        error_message = e.args[0].decode("utf-8", errors="replace") if e.args else str(e)
+        if "not allowed" in error_message.lower():
+            logging.error(
+                "메일 서버가 POP3 로그인을 거부했습니다: %s. "
+                ".env의 EMAIL_USER/EMAIL_PW가 맞는지, 해당 계정에 POP3 사용 권한이 있는지, "
+                "접속 가능한 네트워크/IP인지 확인해 주세요.",
+                error_message,
+            )
+        else:
+            logging.error("메일 서버 로그인 실패: %s", error_message)
+        raise
+
 def check_mail_connection():
     server = None
     try:
-        try:
-            logging.info("POP3 SSL 접속 시도: %s:995", POP3_SERVER)
-            server = poplib.POP3_SSL(POP3_SERVER, 995, timeout=10)
-        except Exception as ssl_error:
-            logging.warning("POP3 SSL 접속 실패, 일반 POP3로 재시도합니다: %s", ssl_error)
-            server = poplib.POP3(POP3_SERVER, 110, timeout=10)
-
-        server.user(EMAIL_USER)
-        server.pass_(EMAIL_PW)
+        server = get_pop3_server()
+        login_pop3(server)
         msg_count = len(server.list()[1])
-        logging.info("메일 서버 로그인 및 목록 조회 성공: %s, 전체 %s건", EMAIL_USER, msg_count)
+        last_idx = read_last_idx(msg_count)
+        logging.info(
+            "메일 서버 로그인 및 목록 조회 성공: %s, 전체 %s건, last_idx %s",
+            EMAIL_USER,
+            msg_count,
+            last_idx,
+        )
     finally:
         if server:
             try:
@@ -143,16 +171,8 @@ def check_and_notify(raise_errors=False, send_daily_report=True):
 
     try:
         # 2. 메일 서버 접속
-        try:
-            logging.info("POP3 SSL 접속 시도: %s:995", POP3_SERVER)
-            server = poplib.POP3_SSL(POP3_SERVER, 995, timeout=10)
-        except Exception as ssl_error:
-            logging.warning("POP3 SSL 접속 실패, 일반 POP3로 재시도합니다: %s", ssl_error)
-            server = poplib.POP3(POP3_SERVER, 110, timeout=10)
-            
-        server.user(EMAIL_USER)
-        server.pass_(EMAIL_PW)
-        logging.info("메일 서버 로그인 성공: %s", EMAIL_USER)
+        server = get_pop3_server()
+        login_pop3(server)
         
         msg_count = len(server.list()[1])
         DATA_DIR.mkdir(parents=True, exist_ok=True)
