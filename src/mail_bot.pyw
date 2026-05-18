@@ -89,9 +89,12 @@ def send_mm(message):
     try:
         response = requests.post(f"{MM_URL}/api/v4/posts", headers=headers, json=payload, verify=False, timeout=10)
         response.raise_for_status()
-        logging.info("Mattermost 알림 전송 성공: HTTP %s", response.status_code)
+        post_id = response.json().get("id", "")
+        logging.info("Mattermost 알림 전송 성공: HTTP %s, post_id=%s", response.status_code, post_id)
+        return True
     except Exception as e:
         logging.exception("Mattermost 알림 전송 실패: %s", e)
+        return False
 
 def read_last_idx(default_idx):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -202,7 +205,8 @@ def check_and_notify(raise_errors=False, send_daily_report=True):
                     f"- **제목**: {subject}\n\n"
                     f"[👉 메일함 확인하기]({mail_link})"
                 )
-                send_mm(msg)
+                if not send_mm(msg):
+                    raise RuntimeError(f"Mattermost 알림 전송 실패로 {i}번째 메일 처리를 중단합니다.")
             
             LAST_IDX_FILE.write_text(str(msg_count), encoding="utf-8")
             logging.info("새 메일 %s건 처리 완료", msg_count - last_idx)
